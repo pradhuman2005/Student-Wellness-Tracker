@@ -4,14 +4,18 @@ const WellnessContext = createContext();
 
 export const useWellness = () => useContext(WellnessContext);
 
-// In production, we use the relative path '/api'. In local dev, we might use the exact localhost path.
-const API_URL = import.meta.env.VITE_API_URL || '/api';
-
 export const WellnessProvider = ({ children }) => {
   const [token, setToken] = useState(() => localStorage.getItem('wellness_token'));
-  const [userProfile, setUserProfileState] = useState(null);
-  const [moodLogs, setMoodLogs] = useState([]);
-  const [loading, setLoading] = useState(true);
+  
+  const [userProfile, setUserProfileState] = useState(() => {
+    const saved = localStorage.getItem('wellness_profile');
+    return saved ? JSON.parse(saved) : null;
+  });
+  
+  const [moodLogs, setMoodLogs] = useState(() => {
+    const saved = localStorage.getItem('wellness_logs');
+    return saved ? JSON.parse(saved) : [];
+  });
 
   const [theme, setTheme] = useState(() => {
     const savedTheme = localStorage.getItem('wellness_theme');
@@ -23,147 +27,86 @@ export const WellnessProvider = ({ children }) => {
     localStorage.setItem('wellness_theme', theme);
   }, [theme]);
 
+  // Persist Data whenever it changes
+  useEffect(() => {
+    if (userProfile) {
+      localStorage.setItem('wellness_profile', JSON.stringify(userProfile));
+    } else {
+      localStorage.removeItem('wellness_profile');
+    }
+  }, [userProfile]);
+
+  useEffect(() => {
+    localStorage.setItem('wellness_logs', JSON.stringify(moodLogs));
+  }, [moodLogs]);
+
   const toggleTheme = () => {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark');
   };
 
-  const apiFetch = async (endpoint, options = {}) => {
-    const headers = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    
-    const response = await fetch(`${API_URL}${endpoint}`, {
-      ...options,
-      headers: { ...headers, ...options.headers }
-    });
-    
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'API Error');
-    return data;
-  };
-
-  // Auth Functions
   const login = async (email, password) => {
-    const data = await apiFetch('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password })
-    });
-    setToken(data.token);
-    localStorage.setItem('wellness_token', data.token);
+    // Fake login
+    if (userProfile && userProfile.email === email && userProfile.password === password) {
+      const fakeToken = 'local-device-token';
+      localStorage.setItem('wellness_token', fakeToken);
+      setToken(fakeToken);
+      return { success: true };
+    }
+    throw new Error('Invalid email or password');
   };
 
-  const signup = async (email, password, profileData) => {
-    const data = await apiFetch('/auth/signup', {
-      method: 'POST',
-      body: JSON.stringify({ email, password, ...profileData })
-    });
-    setToken(data.token);
-    localStorage.setItem('wellness_token', data.token);
+  const signup = async (userData) => {
+    const profile = {
+      ...userData,
+      isSetup: true
+    };
+    setUserProfileState(profile);
+    const fakeToken = 'local-device-token';
+    localStorage.setItem('wellness_token', fakeToken);
+    setToken(fakeToken);
+    return { success: true };
   };
 
   const logout = () => {
-    setToken(null);
-    setUserProfileState(null);
-    setMoodLogs([]);
     localStorage.removeItem('wellness_token');
+    // Keeping profile and logs on the device, just clearing the active session
+    setToken(null);
   };
 
-  // Fetch initial data when token changes
-  useEffect(() => {
-    const loadData = async () => {
-      if (!token) {
-        setLoading(false);
-        return;
-      }
-      try {
-        setLoading(true);
-        const [profileData, moodsData] = await Promise.all([
-          apiFetch('/profile'),
-          apiFetch('/moods')
-        ]);
-        setUserProfileState(profileData);
-        setMoodLogs(moodsData);
-      } catch (err) {
-        console.error("Error loading data:", err);
-        if (err.message === 'API Error' || err.message === 'Forbidden') {
-          logout(); // Invalid token
-        }
-      } finally {
-        setLoading(false);
-      }
+  const addMoodLog = (log) => {
+    const newLog = {
+      ...log,
+      id: Date.now().toString(),
+      date: new Date().toISOString(),
     };
-    loadData();
-  }, [token]);
-
-  // Profile Update
-  const setUserProfile = async (profileUpdate) => {
-    try {
-      await apiFetch('/profile', {
-        method: 'POST',
-        body: JSON.stringify(profileUpdate)
-      });
-      setUserProfileState(prev => ({ ...prev, ...profileUpdate }));
-    } catch (err) {
-      console.error("Error updating profile:", err);
-      throw err;
-    }
+    setMoodLogs(prev => [newLog, ...prev]);
   };
 
-  // Mood Logs
-  const addMoodLog = async (log) => {
-    try {
-      const newLog = {
-        ...log,
-        id: Date.now().toString(),
-        date: new Date().toISOString(),
-      };
-      await apiFetch('/moods', {
-        method: 'POST',
-        body: JSON.stringify(newLog)
-      });
-      setMoodLogs((prevLogs) => [newLog, ...prevLogs]);
-    } catch (err) {
-      console.error("Error saving mood:", err);
-    }
+  const deleteMoodLog = (id) => {
+    setMoodLogs(prev => prev.filter(log => log.id !== id));
   };
 
-  const deleteMoodLog = async (id) => {
-    try {
-      await apiFetch(`/moods/${id}`, { method: 'DELETE' });
-      setMoodLogs((prevLogs) => prevLogs.filter(log => log.id !== id));
-    } catch (err) {
-      console.error("Error deleting mood:", err);
-    }
+  const updateUserProfile = (data) => {
+    setUserProfileState(prev => ({ ...prev, ...data }));
   };
 
-  const getRecentLogs = (count = 5) => {
-    return moodLogs.slice(0, count);
-  };
-
-  const getAverageStressLevel = (days = 7) => {
-    if (moodLogs.length === 0) return 0;
-    const recentLogs = moodLogs.slice(0, days);
-    const sum = recentLogs.reduce((acc, log) => acc + Number(log.stressLevel), 0);
-    return (sum / recentLogs.length).toFixed(1);
+  const value = {
+    theme,
+    toggleTheme,
+    token,
+    userProfile,
+    moodLogs,
+    login,
+    signup,
+    logout,
+    addMoodLog,
+    deleteMoodLog,
+    updateUserProfile,
+    loading: false
   };
 
   return (
-    <WellnessContext.Provider value={{
-      token,
-      loading,
-      moodLogs,
-      userProfile,
-      theme,
-      login,
-      signup,
-      logout,
-      toggleTheme,
-      setUserProfile,
-      addMoodLog,
-      deleteMoodLog,
-      getRecentLogs,
-      getAverageStressLevel,
-      apiFetch // Expose for chatbot
-    }}>
+    <WellnessContext.Provider value={value}>
       {children}
     </WellnessContext.Provider>
   );

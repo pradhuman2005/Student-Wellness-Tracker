@@ -1,48 +1,79 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Send, Bot, User } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Send, Bot, User, Loader2 } from 'lucide-react';
 import { useWellness } from '../context/WellnessContext';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const Chatbot = () => {
-  const { userProfile, moodLogs, apiFetch } = useWellness();
+  const { userProfile, moodLogs } = useWellness();
   const [messages, setMessages] = useState([
-    { role: 'model', text: `Hi ${userProfile?.name || 'there'}! I'm your Antigravity Wellness Assistant. How are you feeling right now?` }
+    {
+      id: 1,
+      sender: 'bot',
+      text: `Hi ${userProfile?.name?.split(' ')[0] || 'there'}! I'm your Wellness Assistant. How are you feeling right now?`
+    }
   ]);
-  const [inputText, setInputText] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  
+  const [inputMessage, setInputMessage] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef(null);
 
-  useEffect(() => {
+  const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isTyping]);
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!inputText.trim()) return;
+    
+    if (!inputMessage.trim()) return;
 
-    const userMessage = { role: 'user', text: inputText };
+    const userMessage = {
+      id: Date.now(),
+      sender: 'user',
+      text: inputMessage.trim()
+    };
+
     setMessages(prev => [...prev, userMessage]);
-    setInputText('');
-    setIsLoading(true);
+    setInputMessage('');
+    setIsTyping(true);
 
     try {
-      const recentMood = moodLogs.length > 0 ? moodLogs[0] : null;
-      let context = `You are a supportive, empathetic mental wellness assistant for a student named ${userProfile?.name || 'student'}. Keep responses concise, helpful, and supportive.`;
-      if (recentMood) {
-        context += ` The user recently logged their mood as ${recentMood.moodText} with a stress level of ${recentMood.stressLevel}/10.`;
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!apiKey || apiKey === 'your_actual_api_key_here') {
+        throw new Error("Missing Gemini API Key in Environment");
       }
 
-      const data = await apiFetch('/chat', {
-        method: 'POST',
-        body: JSON.stringify({ message: userMessage.text, context })
-      });
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-      setMessages(prev => [...prev, { role: 'model', text: data.response }]);
+      // Build context
+      const recentMoods = moodLogs.slice(0, 3).map(log => `${log.moodText} (Stress: ${log.stressLevel}/10)`).join(', ');
+      const context = `You are a highly empathetic and supportive mental wellness assistant. 
+The user's name is ${userProfile?.name}. 
+Their recent moods: ${recentMoods || 'No recent logs'}.
+Keep your responses brief, warm, and conversational. Do not give medical advice.`;
+
+      const prompt = `${context}\n\nUser: ${userMessage.text}\nAssistant:`;
+      const result = await model.generateContent(prompt);
+      
+      const botMessage = {
+        id: Date.now() + 1,
+        sender: 'bot',
+        text: result.response.text()
+      };
+
+      setMessages(prev => [...prev, botMessage]);
     } catch (error) {
-      console.error(error);
-      setMessages(prev => [...prev, { role: 'model', text: 'Sorry, I encountered an error connecting to the secure AI server. Please try again later.' }]);
+      console.error('Chat error:', error);
+      setMessages(prev => [...prev, {
+        id: Date.now() + 1,
+        sender: 'bot',
+        text: "Sorry, I encountered an error. Please make sure you have added your VITE_GEMINI_API_KEY to your Cloudflare Pages dashboard environment variables!"
+      }]);
     } finally {
-      setIsLoading(false);
+      setIsTyping(false);
     }
   };
 
