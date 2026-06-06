@@ -4,7 +4,8 @@ const WellnessContext = createContext();
 
 export const useWellness = () => useContext(WellnessContext);
 
-const API_URL = 'http://localhost:5000/api';
+// In production, we use the relative path '/api'. In local dev, we might use the exact localhost path.
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 export const WellnessProvider = ({ children }) => {
   const [token, setToken] = useState(() => localStorage.getItem('wellness_token'));

@@ -179,6 +179,17 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
   }
 });
 
+// ==========================================
+// STATIC FRONTEND SERVING (FOR PRODUCTION)
+// ==========================================
+// Serve the static files from the React app build directory
+app.use(express.static(path.join(__dirname, '../dist')));
+
+// Catch-all route to serve index.html for React Router
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../dist/index.html'));
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Backend server running on http://localhost:${PORT}`);
